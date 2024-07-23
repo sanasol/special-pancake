@@ -7,16 +7,33 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
 var memInfo runtime.MemStats
 
+type MyChannel struct {
+	C    chan struct{}
+	once sync.Once
+}
+
+func NewMyChannel() *MyChannel {
+	return &MyChannel{C: make(chan struct{})}
+}
+
+func (mc *MyChannel) SafeClose() {
+	mc.once.Do(func() {
+		close(mc.C)
+	})
+}
+
 type Info struct {
-	ch     chan struct{}
+	ch     *MyChannel
 	room   string
 	Id     string `json:"room_id"`
 	Auth   string `json:"auth"`
+	Channels   string `json:"channels"`
 	Proxy  string `json:"proxy"`
 	Online string `json:"online"`
 	Rid    int64  `json:"rid"`
@@ -67,18 +84,19 @@ func debugHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 func cmdHandler(w http.ResponseWriter, r *http.Request) {
-	if !conf.List[r.Header.Get("X-REAL-IP")] {
-		fmt.Fprint(w, "403")
-		return
-	}
+	// 	if !conf.List[r.Header.Get("X-REAL-IP")] {
+	// 		fmt.Fprint(w, "403")
+	// 		return
+	// 	}
 	params := r.URL.Query()
-	if len(params["room"]) > 0 && len(params["id"]) > 0 && len(params["auth"]) > 0 && len(params["proxy"]) > 0 {
+	if len(params["room"]) > 0 && len(params["id"]) > 0 && len(params["auth"]) > 0 && len(params["proxy"]) > 0 && len(params["channels"]) > 0 {
 		now := time.Now().Unix()
 		workerData := Info{
 			room:   params["room"][0],
 			Id:     params["id"][0],
 			Auth:   params["auth"][0],
 			Proxy:  params["proxy"][0],
+			Channels:  params["channels"][0],
 			Online: "0",
 			Start:  now,
 			Last:   now,
@@ -90,6 +108,7 @@ func cmdHandler(w http.ResponseWriter, r *http.Request) {
 		startRoom(workerData)
 	}
 	if len(params["exit"]) > 0 {
+        fmt.Println("exit cmd:", params["exit"])
 		rooms.Stop <- strings.Join(params["exit"], "")
 	}
 	fmt.Fprint(w, string("ok"))
@@ -110,7 +129,7 @@ func startRoom(workerData Info) {
 	}
 
 	workerData.Rid = rid
-	workerData.ch = make(chan struct{})
+	workerData.ch = NewMyChannel()
 
 	go xWorker(workerData, url.URL{Scheme: "wss", Host: "realtime.pa.highwebmedia.com", Path: "/", RawQuery: "access_token=" + workerData.Auth + "&format=json&heartbeats=true&v=1.2&agent=ably-js%2F1.2.13%20browser&remainPresentFor=0"})
 }

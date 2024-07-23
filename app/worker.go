@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -19,7 +22,7 @@ func mapRooms() {
 	for {
 		select {
 		case m := <-rooms.Add:
-			data[m.room] = &Info{Id: m.Id, Auth: m.Auth, Proxy: m.Proxy, Rid: m.Rid, Start: m.Start, Last: m.Last, Online: m.Online, Income: m.Income, Dons: m.Dons, Tips: m.Tips, ch: m.ch}
+			data[m.room] = &Info{Id: m.Id, Auth: m.Auth, Channels: m.Channels, Proxy: m.Proxy, Rid: m.Rid, Start: m.Start, Last: m.Last, Online: m.Online, Income: m.Income, Dons: m.Dons, Tips: m.Tips, ch: m.ch}
 
 		case s := <-rooms.Json:
 			j, err := json.Marshal(data)
@@ -42,7 +45,9 @@ func mapRooms() {
 
 		case room := <-rooms.Stop:
 			if _, ok := data[room]; ok {
-				close(data[room].ch)
+				fmt.Println("safeclose:", room, ok)
+
+				data[room].ch.SafeClose()
 			}
 		}
 	}
@@ -97,38 +102,41 @@ func xWorker(workerData Info, u url.URL) {
 
 	c, _, err := Dialer.Dial(u.String(), nil)
 	if err != nil {
-		fmt.Println(err.Error(), workerData.room)
+		fmt.Println("line 105", err.Error(), workerData.room)
 		return
 	}
 	defer c.Close()
 
 	dons := make(map[string]struct{})
 
-	initMessages := []string{
-		`{"action":10,"flags":327680,"channel":"room:tip_alert:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:purchase:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:fanclub:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:message:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"global:push_service","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room_anon:presence:` + workerData.Id + `:0","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:quality_update:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:notice:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:enter_leave:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:password_protected:` + workerData.Id + `:13","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:mod_promoted:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:mod_revoked:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:status:` + workerData.Id + `:13","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:title_change:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:silence:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:kick:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:update:` + workerData.Id + `","params":{}}`,
-		`{"action":10,"flags":327680,"channel":"room:settings:` + workerData.Id + `","params":{}}`,
+	// 	initMessages := []string{
+	// 		`{"action":10,"flags":327680,"channel":"room_unsessioned:grouped:` + workerData.Id + `","params":{}}`,
+	// 		`{"action":10,"flags":327680,"channel":"room:fanclub:` + workerData.Id + `","params":{}}`,
+	// 		`{"action":10,"flags":327680,"channel":"room:grouped:` + workerData.Id + `:0","params":{}}`,
+	// 		`{"action":10,"flags":327680,"channel":"global:push_service:` + workerData.Id + `","params":{}}`,
+	// 		`{"action":10,"flags":327680,"channel":"room_anon:presence:` + workerData.Id + `:0","params":{}}`,
+	// 		`{"action":10,"flags":327680,"channel":"room:enter_leave:` + workerData.Id + `","params":{}}`,
+	// 	}
+
+	b64, err := base64.StdEncoding.DecodeString(workerData.Channels)
+	if err != nil {
+		fmt.Println(err, workerData.room)
+		return
+	}
+
+	//     fmt.Println("Channels", workerData.room, b64)
+
+	var initMessages []string
+
+	if err := json.Unmarshal(b64, &initMessages); err != nil {
+		fmt.Println("exit: no channels params", workerData.room, err)
+		return
 	}
 
 	c.SetReadDeadline(time.Now().Add(1 * time.Minute))
 	_, message, err := c.ReadMessage()
 	if err != nil {
-		fmt.Println(err.Error(), workerData.room)
+		fmt.Println("line 139", err.Error(), workerData.room)
 		return
 	}
 
@@ -148,19 +156,19 @@ func xWorker(workerData Info, u url.URL) {
 	}
 
 	if err = c.WriteMessage(websocket.TextMessage, []byte(`{"action":17, "auth":{"accessToken":"`+workerData.Auth+`"}}`)); err != nil {
-		fmt.Println(err.Error(), workerData.room)
+		fmt.Println("line 159", err.Error(), workerData.room)
 		return
 	}
 
 	_, message, err = c.ReadMessage()
 	if err != nil {
-		fmt.Println(err.Error(), workerData.room)
+		fmt.Println("line 165", err.Error(), workerData.room)
 		return
 	}
 
 	for _, im := range initMessages {
 		if err = c.WriteMessage(websocket.TextMessage, []byte(im)); err != nil {
-			fmt.Println(err.Error(), workerData.room)
+			fmt.Println("line 171", err.Error(), workerData.room)
 			return
 		}
 	}
@@ -184,7 +192,7 @@ func xWorker(workerData Info, u url.URL) {
 		case <-leave.C:
 			fmt.Println("leave exit:", workerData.room)
 			return
-		case <-workerData.ch:
+		case <-workerData.ch.C:
 			fmt.Println("Exit room:", workerData.room)
 			return
 		default:
@@ -193,10 +201,10 @@ func xWorker(workerData Info, u url.URL) {
 		c.SetReadDeadline(time.Now().Add(30 * time.Minute))
 		_, message, err := c.ReadMessage()
 		if err != nil {
-			fmt.Println(err.Error(), workerData.room)
-			if income > 1 && !isLeave && websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
-				go reconnectRoom(workerData)
-			}
+			fmt.Println("line 204", err.Error(), workerData.room, "income:", income > 1, "not leave: ", !isLeave, "unexpected:", websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway))
+			//if income > 1 && !isLeave && websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
+			//	go reconnectRoom(workerData)
+			//}
 			return
 		}
 
@@ -219,7 +227,7 @@ func xWorker(workerData Info, u url.URL) {
 
 		if input.Action == 15 {
 
-			if input.Channel == "room:enter_leave:"+workerData.Id {
+			if strings.Contains(m, "RoomEnterLeaveTopic") {
 				type Message struct {
 					Data string `json:"data"`
 				}
@@ -262,7 +270,7 @@ func xWorker(workerData Info, u url.URL) {
 				continue
 			}
 
-			if input.Channel == "room:tip_alert:"+workerData.Id {
+			if strings.Contains(m, "RoomTipAlertTopic") {
 				tips := []struct {
 					Data string `json:"data"`
 				}{}
@@ -273,6 +281,7 @@ func xWorker(workerData Info, u url.URL) {
 				}
 
 				donate := struct {
+					Topic  string `json:"_topic"`
 					Name   string `json:"to_username"`
 					From   string `json:"from_username"`
 					Amount int64  `json:"amount"`
@@ -281,6 +290,10 @@ func xWorker(workerData Info, u url.URL) {
 				for _, tip := range tips {
 					if err := json.Unmarshal([]byte(tip.Data), &donate); err != nil {
 						fmt.Println(err.Error(), workerData.room)
+						continue
+					}
+
+					if donate.Topic != "RoomTipAlertTopic" {
 						continue
 					}
 
@@ -310,7 +323,9 @@ func xWorker(workerData Info, u url.URL) {
 					workerData.Income += donate.Amount
 					rooms.Add <- workerData
 
-					fmt.Println(donate.From, "send", donate.Amount, "tokens to", workerData.room)
+					if rand.Intn(100) < 10 {
+						fmt.Println(donate.From, "send", donate.Amount, "tokens to", workerData.room)
+					}
 				}
 			}
 		}

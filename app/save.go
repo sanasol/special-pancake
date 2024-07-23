@@ -125,13 +125,13 @@ func saveDB() {
 					st.Close()
 				}
 
-				tx, err = Clickhouse.Begin()
-				if err == nil {
-					st, _ := tx.Prepare("INSERT INTO stat VALUES (?, ?, ?, ?, ?)")
+				txx, errx := Clickhouse.Beginx()
+				if errx == nil {
+					st, _ := txx.Preparex("INSERT INTO stat VALUES (?, ?, ?, ?, ?)")
 					for _, v := range bulk {
-						st.Exec(uint32(data[v.From].Id), uint32(v.Rid), uint32(v.Amount), time.Unix(v.Now, 0), uint32(v.Now))
+						st.MustExec(uint32(data[v.From].Id), uint32(v.Rid), uint32(v.Amount), time.Unix(v.Now, 0), uint32(v.Now))
 					}
-					tx.Commit()
+					txx.Commit()
 					st.Close()
 				}
 
@@ -192,13 +192,23 @@ func saveLogs() {
 		select {
 		case <-ticker.C:
 			if len(bulk) > 0 {
-				tx, err := Mysql.Begin()
-				if err == nil {
-					st, _ := tx.Prepare("INSERT INTO `logs` (`rid`, `time`, `mes`) VALUES (?, ?, ?)")
+				//tx, err := Mysql.Begin()
+				//if err == nil {
+				//	st, _ := tx.Prepare("INSERT INTO `logs` (`rid`, `time`, `mes`) VALUES (?, ?, ?)")
+				//	for _, v := range bulk {
+				//		st.Exec(v.Rid, v.Now, v.Mes)
+				//	}
+				//	tx.Commit()
+				//	st.Close()
+				//}
+
+				txx, errx := Clickhouse.Beginx()
+				if errx == nil {
+					st, _ := txx.Preparex("INSERT INTO logs VALUES (?, ?, ?)")
 					for _, v := range bulk {
-						st.Exec(v.Rid, v.Now, v.Mes)
+						st.MustExec(uint32(v.Rid), v.Mes, time.Unix(v.Now, 0))
 					}
-					tx.Commit()
+					txx.Commit()
 					st.Close()
 				}
 				bulk = nil

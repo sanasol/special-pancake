@@ -44,6 +44,7 @@ var (
 )
 
 func main() {
+	fmt.Println("chaturbate build 1")
 	startConfig()
 
 	initMysql()
@@ -60,8 +61,9 @@ func main() {
 	http.HandleFunc("/chaturbate/debug/", debugHandler)
 
 	go fastStart()
+	go listenHttp()
 
-	const SOCK = "/tmp/statbate.sock"
+	const SOCK = "/tmp/sockets/statbate.sock"
 	os.Remove(SOCK)
 	unixListener, err := net.Listen("unix", SOCK)
 	if err != nil {
@@ -70,6 +72,19 @@ func main() {
 	defer unixListener.Close()
 	os.Chmod(SOCK, 0777)
 	log.Fatal(http.Serve(unixListener, nil))
+}
+
+func listenHttp() {
+	httpListener, errHttp := net.Listen("tcp", ":7878")
+	if errHttp != nil {
+		log.Fatal("Listen 1 (http): ", errHttp)
+	}
+	defer httpListener.Close()
+	err := http.Serve(httpListener, nil)
+	if err != nil {
+		log.Fatal("Listen 2 (http): ", err)
+		return
+	}
 }
 
 func initMysql() {
@@ -102,7 +117,7 @@ func socketHandler() {
 			//fmt.Println("socketServer", len(socketServer), cap(socketServer))
 
 			if conn == nil || conn.RemoteAddr() == nil {
-				conn, err = net.DialTimeout("unix", "/tmp/echo.sock", time.Millisecond*10)
+				conn, err = net.DialTimeout("unix", "/tmp/sockets/echo.sock", time.Millisecond*10)
 				if err != nil {
 					fmt.Println(err.Error())
 					continue
@@ -142,17 +157,18 @@ func fastStart() {
 		}
 		fmt.Println("fastStart:", k, v.Id, v.Auth, v.Proxy)
 		workerData := Info{
-			room:   k,
-			Id:     v.Id,
-			Auth:   v.Auth,
-			Proxy:  v.Proxy,
-			Online: v.Online,
-			Start:  v.Start,
-			Last:   now,
-			Rid:    v.Rid,
-			Income: v.Income,
-			Dons:   v.Dons,
-			Tips:   v.Tips,
+			room:     k,
+			Id:       v.Id,
+			Auth:     v.Auth,
+			Proxy:    v.Proxy,
+			Channels: v.Channels,
+			Online:   v.Online,
+			Start:    v.Start,
+			Last:     now,
+			Rid:      v.Rid,
+			Income:   v.Income,
+			Dons:     v.Dons,
+			Tips:     v.Tips,
 		}
 		startRoom(workerData)
 		time.Sleep(100 * time.Millisecond)
